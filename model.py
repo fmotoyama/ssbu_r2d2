@@ -83,8 +83,10 @@ class LSTMDuelingNetwork(nn.Module):
         self.val = nn.Sequential(
             nn.Linear(n_mid, n_mid),
             nn.ReLU(inplace=True),
-            nn.Linear(n_mid, n_out)
+            nn.Linear(n_mid, 1)
         )
+        
+        
 
     def forward(self, x, lstm_state, prev_action, prev_reward):
         # (N,L,Hin) → (N,L,Hmid)
@@ -120,6 +122,7 @@ class LSTMDuelingNetwork(nn.Module):
         # h: (N,Hmid)
         h = next_lstm_state[0].view(-1,self.n_mid)
         
+        # adv: (N,Hout), val: (N,1).expand(-1, adv.size(1))
         adv = self.adv(h)
         val = self.val(h).expand(-1, adv.size(1))
         

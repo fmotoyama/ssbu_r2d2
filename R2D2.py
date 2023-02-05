@@ -95,7 +95,7 @@ if __name__ == '__main__':
     
     config = R2D2config()
     
-    games = [Game('emmu_local',env_num) for env_num in range(config.actors_emmu_local)]\
+    games = [Game('emmu_local',env_num) for env_num in range(config.actors_emmu_local)] \
             + [Game('emmu_remote',env_num) for env_num in range(config.actors_emmu_remote)] \
             + [Game('switch',env_num) for env_num in range(config.actors_switch)]
     
