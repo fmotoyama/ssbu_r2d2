@@ -8,6 +8,7 @@ import traceback, shutil, time
 import numpy as np
 from torch import multiprocessing as mp
 from torch.multiprocessing import Queue, Event
+from cpprb import MPPrioritizedReplayBuffer
 
 from mylogger import MetricLogger
 from actor import Actor
