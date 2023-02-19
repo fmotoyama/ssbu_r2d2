@@ -85,14 +85,6 @@ class LSTMDuelingNetwork(nn.Module):
             nn.Linear(n_mid, 1)
         )
         
-        self.splitter = [
-            nn.Sequential(
-                nn.Linear(n_mid, l),
-                nn.ReLU(inplace=True)
-                )
-            for l in config.action_shape
-            ]
-        
 
     def forward(self, x, lstm_state, prev_action, prev_reward):
         # (N,L,Hin) → (N,L,Hmid)

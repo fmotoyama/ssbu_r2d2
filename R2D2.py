@@ -106,7 +106,19 @@ if __name__ == '__main__':
     config.save_path.mkdir(parents=True)
     
     # Actorが遷移情報を置き、Learnerが読む
-    queue_memory = Queue(maxsize=6)
+    memory = MPPrioritizedReplayBuffer(
+        config.memory_size,
+        env_dict = {
+            "lstm_state_hs": {"shape": (1,1,config.hidden_size), 'dtype': np.int32},
+            "lstm_state_cs": {"shape": (1,1,config.hidden_size), 'dtype': np.int32},
+            "states": {"shape": config.state_size, 'dtype': np.float32},
+            "actions": {"shape": 1},
+            "rewards": {"shape": 1},
+            "dones": {"shape": 1}
+            }
+        )
+    
+    
     # Actor,Learnerがログを置き、Loggerが読む
     queue_log = Queue(maxsize=(config.actors + 1) * 2)
     # 終了フラグ
@@ -123,7 +135,7 @@ if __name__ == '__main__':
                 'config':config,
                 'env':envs[i],
                 'epsilon':epsilons[i],
-                'queue_memory':queue_memory,
+                'memory':memory,
                 'queue_log':queue_log,
                 'stop_flag':stop_flag
                 }
@@ -135,7 +147,7 @@ if __name__ == '__main__':
         target=learner_work,
         kwargs={
             'config':config,
-            'queue_memory':queue_memory,
+            'memory':memory,
             'queue_log':queue_log,
             'stop_flag':stop_flag
             }
@@ -166,10 +178,11 @@ if __name__ == '__main__':
         stop_flag.set()
     # 終了フラグが立ったのち、全プロセスが終了するまでキューを空にし続ける
     while any([any([actor.is_alive() for actor in actors]), learner.is_alive(), logger.is_alive()]):
-        for queue in [queue_memory, queue_log]:
-            while not queue.empty():
-                queue.get()
-    
+        while not queue_log.empty():
+            queue_log.get()
+        while not memory.get_buffer_size():
+            memory.clear()
+    #!!! memoryは空にしなくても大丈夫か
     
     [actor.join() for actor in actors]
     learner.join()

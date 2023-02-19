@@ -15,7 +15,7 @@ from model import LSTMDuelingNetwork
 
 
 class Learner:
-    def __init__(self, config, queue_memory, queue_log, stop_flag):
+    def __init__(self, config, memory, queue_log, stop_flag):
         self.config = config
         self.queue_memory = queue_memory
         self.queue_log = queue_log
@@ -180,25 +180,6 @@ class Learner:
         return current_Q, target_Q
     
     
-    
-    def td_estimate(self, states, actions):
-        current_Q = self.online_net(states)[np.arange(0, self.config.batch_size), actions]
-        return current_Q
-
-    @torch.no_grad()
-    def td_target(self, next_states, rewards, dones):
-        # onlineネットワークを用いて、合法手から最善手を選択
-        next_state_Q = self.online_net(next_states)
-        best_action = torch.argmax(next_state_Q, axis=1)
-        # 最善手のQ値をtargetネットワークから取得
-        next_Q = self.target_net(next_states)[np.arange(0, self.config.batch_size), best_action]
-        
-        #next_Q = self.rescaling_inv(next_Q)
-        #target_Q = rewards + (1-dones.float())*next_Q*self.config.gamma
-        #return self.rescaling(target_Q).float()
-        return (rewards + (1-dones.float())*next_Q*self.config.gamma).float()
-    
-
     def update_Q_online(self, td_est, td_tgt, weights):
         """onlineのパラメータを更新"""
         loss = self.loss_fn(td_est * weights, td_tgt * weights)
@@ -280,7 +261,7 @@ class Learner:
 
 class ReplayMemory(SumTree):
     def __init__(self,config, device):
-        super().__init__(config.memory_max)
+        super().__init__(config.memory_size)
         self.config = config
         self.device = device
         #self.sequence = [[] for _ in range(config.actors)]

@@ -4,7 +4,7 @@ Created on Sat Oct  1 14:34:54 2022
 
 @author: f.motoyama
 """
-import time
+import time, copy
 import numpy as np
 
 import torch
@@ -13,40 +13,49 @@ import queue        #queueu.Emptyをキャッチする用
 from model import LSTMDuelingNetwork
 
 class Actor:
-    def __init__(self, config, env, epsilon, queue_memory, queue_log, stop_flag):
+    def __init__(self, config, env, epsilon, memory, queue_log, stop_flag):
         self.config = config
         self.env = env
         self.env_id = env.env_id
         self.epsilon = epsilon
-        self.queue_memory = queue_memory
+        self.memory = memory
         self.queue_log = queue_log
         self.stop_flag = stop_flag
         
         self.device = 'cuda' if config.play_on_gpu else 'cpu'
         assert torch.cuda.is_available() or not config.play_on_gpu, f"Actor {self.env_id} can't use gpu"
         
-        self.net = LSTMDuelingNetwork(config).to(device=self.device).float()
-        self.net.eval() # training_modeがデフォなので
+        self.online_net = LSTMDuelingNetwork(config).to(device=self.device).float()
+        self.target_net = LSTMDuelingNetwork(config).to(device=self.device).float()
+        self.online_net.eval() # training_modeがデフォなので
+        self.target_net.eval()
+    
     
     @torch.no_grad()
     def run(self):
         print(f'Actor {self.env_id}: run', flush=True)
-        #self.recv_param()
         self.load_param()
         curr_step = 0
-        states = []
-        actions = [0]   #　ステップを開始する前の記録を1つ保持 action=0を無入力とみなしている
-        rewards = [0]   #　ステップを開始する前の記録を1つ保持
-        dones = []
-        qs = []
+        local_memory = {
+            "lstm_state_hs": [],
+            "lstm_state_cs": [],
+            "states": [],
+            "actions": [],
+            "rewards": [],
+            "dones": [],
+            "best_actions": [],
+            "q_currents": [],
+            "q_targets": [],   # 未来のact()で求められるargmax(online_net(state(t+1)))を用いるため、データの追加が他より遅れる
+            }
+        sequence_length = 1 + self.config.r2d2_burnin + self.config.input_length + 1
         while True:
             # episode開始
             lstm_state = (
                 torch.zeros(1, 1, self.config.hidden_size, device=self.device),
                 torch.zeros(1, 1, self.config.hidden_size, device=self.device)
                 )
-            lstm_state_hs = [lstm_state[0]]
-            lstm_state_cs = [lstm_state[1]]
+            local_memory["lstm_state_hs"].append(lstm_state[0])
+            local_memory["lstm_state_cs"].append(lstm_state[1])
             state = self.env.reset()
             episode_rewards = []
             episode_frames = []
@@ -54,17 +63,36 @@ class Actor:
             while True:
                 curr_step += 1
                 # アクションを決定
-                action, q, lstm_state = self.act(state, lstm_state, actions[-1], rewards[-1])
+                prev_action = local_memory["actions"][-1] if local_memory["actions"] else 0
+                prev_reward = local_memory["rewards"][-1] if local_memory["rewards"] else 0
+                action, q_current, lstm_state, best_action = self.act(state, lstm_state, prev_action, prev_reward)
                 # アクションを実行
                 next_state, reward, done, info = self.env.step(action)
                 # transitionsを蓄積
-                states.append(state)
-                actions.append(action)
-                rewards.append(reward)
-                dones.append(done)
-                qs.append(q)
+                local_memory['states'].append(state)
+                local_memory['actions'].append(action)
+                local_memory['rewards'].append(reward)
+                local_memory['dones'].append(done)
+                local_memory['best_actions'].append(best_action)
+                local_memory['q_currents'].append(q_current)
+                if 2 < len(local_memory['rewards']):
+                    local_memory['q_targets'].append(
+                        self.q_target(
+                            state,
+                            best_action,
+                            local_memory['rewards'][-2],
+                            local_memory['dones'][-2]
+                            )
+                        )
                 episode_rewards.append(reward)
                 episode_frames.append(info['frame'])
+                
+                if sequence_length + 1 < len(local_memory['states']):
+                    self.memorry.add
+                
+                
+                
+                
                 # transitionを送信
                 #if curr_step % self.config.send_size == 0 or done:
                 if done:
@@ -77,8 +105,8 @@ class Actor:
                         rewards[1:],# 1~t
                         dones       # 1~t
                         )
-                    lstm_state_hs = [lstm_state_h.tolist() for lstm_state_h in lstm_state_hs]
-                    lstm_state_cs = [lstm_state_c.tolist() for lstm_state_c in lstm_state_cs]
+                    lstm_state_hs = [lstm_state_h.numpy() for lstm_state_h in lstm_state_hs]
+                    lstm_state_cs = [lstm_state_c.numpy() for lstm_state_c in lstm_state_cs]
                     transitions = {
                         'env_id': self.env_id,
                         'lstm_state_hs': lstm_state_hs, # (t,L=1,N=1,Hmid)
@@ -128,15 +156,17 @@ class Actor:
         prev_action = torch.tensor([[prev_action]], device=self.device)
         prev_reward = torch.tensor([[prev_reward]], device=self.device)
         
-        action_values, lstm_state = self.net(state, lstm_state, prev_action, prev_reward)
-        q = torch.max(action_values).item()
+        action_values, lstm_state = self.online_net(state, lstm_state, prev_action, prev_reward)
+        q_current = torch.max(action_values).item()
+        best_action = torch.argmax(action_values, axis=1).item()
         if np.random.rand() < self.epsilon:
             # ランダムアクション
-            action_idx = np.random.randint(self.config.action_size)
+            action = np.random.randint(self.config.action_size)
         else:
             # ネットワークが出力するQ値の分布から最適なアクションを選択
-            action_idx = torch.argmax(action_values, axis=1).item()
-        return action_idx, q, lstm_state
+            action = best_action
+        return action, q_current, lstm_state, best_action
+    
     
     def load_param(self):
         #https://pytorch.org/tutorials/recipes/recipes/save_load_across_devices.html
@@ -147,18 +177,18 @@ class Actor:
                 if self.config.learn_on_gpu:
                     if self.config.play_on_gpu:
                         # gpu → gpu
-                        self.net.load_state_dict(torch.load(load_file))
+                        self.online_net.load_state_dict(torch.load(load_file))
                     else:
                         # gpu → cpu
-                        self.net.load_state_dict(torch.load(load_file, map_location='cpu'))
-                        #self.net.load_state_dict(torch.load(load_file, map_location={'cuda:0': 'cpu'}))#!!!
+                        self.online_net.load_state_dict(torch.load(load_file, map_location='cpu'))
+                        #self.online_net.load_state_dict(torch.load(load_file, map_location={'cuda:0': 'cpu'}))#!!!
                 else:
                     if self.config.play_on_gpu:
                         # cpu → gpu
-                        self.net.load_state_dict(torch.load(load_file, map_location='cuda'))#直後にmodel.to(device)が要るかが怪しい
+                        self.online_net.load_state_dict(torch.load(load_file, map_location='cuda'))#直後にmodel.to(device)が要るかが怪しい
                     else:
                         # cpu → cpu
-                        self.net.load_state_dict(torch.load(load_file))
+                        self.online_net.load_state_dict(torch.load(load_file))
                 
             except (FileNotFoundError,PermissionError):
                 if 120 < time.time() - t:
@@ -172,21 +202,24 @@ class Actor:
         t = time.time() - t
         if 1.0 < t:
             print(f"Actor {self.env_id}: waited {round(t, 2)} sec to load param", flush=True)
-            
     
-    # actorごとにqueue_memoryを用意
-    def send_transition(self, transitions):
-        # Learnerのmemoryに遷移情報を渡す
-        try:
-            t = time.time()
-            self.queue_memory.put(transitions,timeout=60)
-            t = time.time() - t
-            if 0.3 < t:
-                print(f"Actor {self.env_id}: waited {round(t, 2)} sec to put in memory", flush=True)
-        except queue.Full as e:
-            print(f"Actor {self.env_id}: timeout to put transition", flush=True)
-            if not self.stop_flag.is_set():
-                raise e
+    
+
+    def q_target(self,state,best_action,reward,done):
+        state = torch.tensor(state, device=self.device).view(1,1,-1)
+        next_q = self.target_net(state)[0][0,best_action]
+        next_q = self.rescaling_inv(next_q)
+        target_q = reward + (1-done)*next_q*self.config.gamma
+        target_q = self.rescaling(target_q).float()
+    @staticmethod
+    def rescaling(x):
+        epsilon = 0.001
+        return torch.sign(x)*(torch.sqrt(torch.abs(x) + 1) - 1) + epsilon*x
+    @staticmethod
+    def rescaling_inv(x):
+        epsilon = 0.001
+        return torch.sign(x)*(((torch.sqrt(1 + 4*epsilon*(torch.abs(x) + 1 + epsilon)) - 1)/(2*epsilon))**2 - 1)
+
     
     
     def calc_priorities(self, qs, next_lstm_state, action, next_state, rewards, dones):
@@ -206,12 +239,12 @@ class Actor:
         next_Q = np.roll(td_est, -1)
         next_state = torch.tensor(next_state, device=self.device).view(1,1,-1)
         next_Q[-1] = torch.max(
-            self.net(next_state, next_lstm_state, action, reward)[0]
+            self.online_net(next_state, next_lstm_state, action, reward)[0]
             ).item()
         td_tgt = np.array(rewards) + (1 - np.array(dones)) * next_Q * self.config.gamma
         
-        priorities = (np.abs(td_tgt-td_est) + self.config.PER_epsilon) ** self.config.PER_alpha
-        return priorities.tolist()
+        priorities = np.abs(td_tgt-td_est)
+        return priorities.numpy()
         
     
     def logging(self,rewards,frames,timedelta):

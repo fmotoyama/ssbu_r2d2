@@ -27,7 +27,7 @@ class R2D2config:
         #self.steps = 12
         self.learn_on_gpu = True
         self.batch_size = 64
-        self.memory_max = 1e5
+        self.memory_size = 1e5
         self.save_every = self.steps//10    # チェックポイントをセーブする間隔
         #self.epsilon_min = 0.01             # epsilon-greety
         #self.epsilon_max = 0.4
@@ -40,10 +40,10 @@ class R2D2config:
         self.sync_every = 1e3               # Q_targetにQ_onlineを同期する間隔
         self.send_param_every = 10          # learnerが最新のパラメータを置く間隔
         # PER
-        self.PER_epsilon = 0.001            # 重さが0になることを防ぐ微小量
-        self.PER_alpha = 0.6                # 0~1 0のとき完全なランダムサンプリング
+        #self.PER_epsilon = 0.001            # 重さが0になることを防ぐ微小量
+        #self.PER_alpha = 0.6                # 0~1 0のとき完全なランダムサンプリング
         # 重要度サンプリング
-        self.IS_beta = 0.4                  # 補正の強さ 固定値
+        #self.IS_beta = 0.4                  # 補正の強さ 固定値
         # R2D2
         self.r2d2_burnin = 40
         self.input_length = 40              # 学習に用いる時系列長
