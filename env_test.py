@@ -4,68 +4,43 @@ Created on Sat Jan 28 13:48:04 2023
 
 @author: fmotoyama
 """
-import traceback
 import numpy as np
-import multiprocessing as mp
-from game.ssbu_config import R2D2config, Game
+from game.ssbu_config import R2D2config, Env_emmu_local
+from R2D2 import Process
 
 
-class Process(mp.Process):
-    def __init__(self, *args, **kwargs):
-        mp.Process.__init__(self, *args, **kwargs)
-        self._pconn, self._cconn = mp.Pipe()
-        self._exception = None
-
-    def run(self):
-        try:
-            mp.Process.run(self)
-            self._cconn.send(None)
-        except Exception as e:
-            tb = traceback.format_exc()
-            self._cconn.send((e, tb))
-            raise e
-
-    @property
-    def exception(self):
-        if self._pconn.poll():
-            self._exception = self._pconn.recv()
-        return self._exception
 
 
-def worker():
-    env_type = 'emmu_local'
-    config = R2D2config()
-    game = Game(0, env_type)
-    
-    config.state_size = game.state_size
-    config.action_size = game.action_size
-    
+def worker(game,config):
+    game.get_emmu_Handles()
     game.reset()
-    prev_reward = 0
+    
+    reward_sum = 0
     while True:
-        #action = int(input('action:'))
-        action = np.random.randint(game.action_size)
-        obs,reward,done = game.step(action)
-        if reward != 0 or prev_reward != 0:
+        action = np.random.randint(config.action_size)
+        action = 0
+        obs,reward,done,_ = game.step(action)
+        
+        reward_sum += reward
+        if reward != 0:
             print(reward)
-            #break
         if done:
-            game.reset()
-            game.close()
             break
-        prev_reward = reward
+    
+    print('reward_sum =', reward_sum)
+    game.close()
 
 
 if __name__ == '__main__':
+    game = Env_emmu_local(0)
+    config = R2D2config()
     
-    
-    
-    """
-    worker(config,game)
+    #"""
+    worker(game,config)
     """
     child_process = Process(
         target=worker,
-        args=()
+        args=(game,config)
         )
     
     # 各サブプロセスを開始

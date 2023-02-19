@@ -55,9 +55,8 @@ class LSTMDuelingNetwork(nn.Module):
         n_in = config.state_size
         n_mid = config.hidden_size
         n_out = config.action_size
-        
-        #n_mid = 64
         self.n_mid = n_mid
+        
         self.block = nn.Sequential(
             nn.Linear(n_in, n_mid),
             nn.ReLU(inplace=True),
@@ -86,36 +85,45 @@ class LSTMDuelingNetwork(nn.Module):
             nn.Linear(n_mid, 1)
         )
         
+        self.splitter = [
+            nn.Sequential(
+                nn.Linear(n_mid, l),
+                nn.ReLU(inplace=True)
+                )
+            for l in config.action_shape
+            ]
         
 
     def forward(self, x, lstm_state, prev_action, prev_reward):
         # (N,L,Hin) → (N,L,Hmid)
         h = self.block(x)
         
+        """
+        # prev_action: (N,L) → (N,L,action_onehot)
+        prev_action_multi = F.one_hot(prev_action, num_classes=self.config.action_size)
+        """
         # prev_actionをaction_shapeの次元に分割
-        # (N,L) → (N,L),(N,L),...
-        tgt = prev_action.long().detach().clone()
-        prev_action = []
-        for l in reversed(self.config.action_shape):
-            prev_action = [tgt%l] + prev_action
-            tgt = torch.div(tgt, l, rounding_mode='floor')
-        assert torch.all(tgt==0).item()
+        # (N,L) → [(N,L),(N,L),...]
+        prev_action = prev_action.long().detach().clone()
+        prev_action_multi = []
+        base = self.config.action_size
+        for l in self.config.action_shape:
+            base = base // l
+            prev_action_multi.append(prev_action // base)
+            prev_action = prev_action % base
         # 各次元でワンホット化 長さはその次元のサイズ-1
-        #　(N,L),(N,L),... → (N,L,onehot1),(N,L,onehot2),...
-        prev_action = [
+        #　[(N,L),(N,L),...] → [(N,L,onehot1),(N,L,onehot2),...]
+        prev_action_multi = [
             F.one_hot(mat, num_classes=l)[:,:,1:]
-            for mat,l in zip(prev_action,self.config.action_shape)
+            for mat,l in zip(prev_action_multi,self.config.action_shape)
             ]
-        # (N,L,onehot1),(N,L,onehot2),... → (N,L,onehot)
-        prev_action = torch.cat(prev_action, 2)
-        """
-        # prev_action: (N,L) → (N,L,action_one_hot)
-        prev_action = F.one_hot(prev_action, num_classes=self.config.action_size)
-        """
+        # [(N,L,onehot1),(N,L,onehot2),...] → (N,L,onehot)
+        prev_action_multi = torch.cat(prev_action_multi, 2)
+        
         # prev_reward: (N,L) → (N,L,1)
         prev_reward = prev_reward.unsqueeze(-1)
         # h: (N,L,Hmid) → (N,L,Hmid+action_onehot+1)
-        h = torch.cat((h, prev_action, prev_reward), 2)
+        h = torch.cat((h, prev_action_multi, prev_reward), 2)
         
         # _: (N,L,Hmid), next_lstm_state: ((1,N,Hmid),(1,N,Hmid))
         _, next_lstm_state = self.lstm(h,lstm_state)

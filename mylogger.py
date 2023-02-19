@@ -12,8 +12,9 @@ from collections import defaultdict
 
 
 class MetricLogger:
-    def __init__(self, config, queue_log, stop_flag):
+    def __init__(self, config, env_ids, queue_log, stop_flag):
         self.config = config
+        self.env_ids = env_ids
         self.queue_log = queue_log
         self.stop_flag = stop_flag
         
@@ -25,7 +26,10 @@ class MetricLogger:
         self.actor_label = ['Episode','MeanReward','Length','TimeDelta','Frame_mean']
         self.learner_label = ['Step','loss','q','TimeDelta']
                 
-        self.actor_log_dirs = {env_id: self.save_dir / f'actor_log_{env_id}.csv' for env_id in config.env_ids}
+        self.actor_log_dirs = {
+            env_id: self.save_dir / f'actor_log_{env_id}.csv'
+            for env_id in env_ids
+            }
         for actor_log in self.actor_log_dirs.values():
             with open(actor_log, 'a', newline='') as f:
                 writer = csv.writer(f)
@@ -136,7 +140,7 @@ class MetricLogger:
     def draw(self):
         # 描画
         for label in ['ep_reward','ep_length']:
-            for env_id in self.config.env_ids:
+            for env_id in self.env_ids:
                 plt.plot(
                     np.arange(len(getattr(self, f'moving_avg_{label}')[env_id])),
                     getattr(self, f'moving_avg_{label}')[env_id],

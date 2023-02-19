@@ -56,7 +56,6 @@ class Learner:
             self.recv_transitions()
             # 最新のネットワークをActorに渡す
             if self.curr_step % self.config.send_param_every == 0:
-                #self.send_param()
                 self.save_param()
             # onlineをtargetへ同期
             if self.curr_step % self.config.sync_every == 0:
@@ -94,9 +93,8 @@ class Learner:
     
     
     def burnin(self):
-        # memoryがある程度たまるまで学習しない 2000秒かかるならタイムアウト
-        for _ in range(2000):
-            #self.send_param()
+        # memoryがある程度たまるまで学習しない 60秒かかるならタイムアウト
+        for _ in range(600):
             self.save_param()
             self.recv_transitions()
             if self.config.burnin <= self.memory.count_add:

@@ -51,11 +51,12 @@ def actor_work(**kwargs):
     stop_flag = kwargs['stop_flag']
     env = kwargs['env']
     env_id = env.env_id
-    env.env.get_emmu_Handles()
     
     try:
+        env.get_emmu_Handles()
         actor = Actor(**kwargs)
         actor.run()
+        env.close()
         print(f'Actor {env_id}: closed', flush=True)
     except Exception as e:
         stop_flag.set()
@@ -91,14 +92,14 @@ def logger_work(**kwargs):
 
 if __name__ == '__main__':
     #from game.pole_config import R2D2config, Game
-    from game.ssbu_config import R2D2config, Game
+    from game.ssbu_config import R2D2config, Game, Env_emmu_local
     
     config = R2D2config()
     
-    games = [Game('emmu_local',env_num) for env_num in range(config.actors_emmu_local)] \
-            + [Game('emmu_remote',env_num) for env_num in range(config.actors_emmu_remote)] \
-            + [Game('switch',env_num) for env_num in range(config.actors_switch)]
-    
+    envs = [Env_emmu_local(env_num) for env_num in range(config.actors_emmu_local)] \
+           + [Game('emmu_remote',env_num) for env_num in range(config.actors_emmu_remote)] \
+           + [Game('switch',env_num) for env_num in range(config.actors_switch)]
+    env_ids = [env.env_id for env in envs]
     
     # 記録用のディレクトリを作成
     config.save_path.mkdir(parents=True)
@@ -119,7 +120,7 @@ if __name__ == '__main__':
             target=actor_work,
             kwargs={
                 'config':config,
-                'env':games[i],
+                'env':envs[i],
                 'epsilon':epsilons[i],
                 'queue_memory':queue_memory,
                 'queue_log':queue_log,
@@ -143,6 +144,7 @@ if __name__ == '__main__':
         target=logger_work,
         kwargs={
             'config':config,
+            'env_ids':env_ids,
             'queue_log':queue_log,
             'stop_flag':stop_flag
             }
@@ -176,6 +178,15 @@ if __name__ == '__main__':
     e_actors = [actor.exception for actor in actors]
     e_learner = learner.exception
     e_logger = logger.exception
+    
+    for e,e_name in zip(
+            e_actors + [e_learner, e_logger],
+            [f'e_actors{i}' for i in range(len(e_actors))] + ['e_learner', 'e_logger']
+            ):
+        if e is not None:
+            with open(config.save_path / f'{e_name}.txt', mode='w') as f:
+                f.write(type(e[0]).__name__ + '\n\n' + e[1])
+    
     
     if any(e_actors) or e_learner or e_logger:
         #shutil.rmtree(config.save_path)

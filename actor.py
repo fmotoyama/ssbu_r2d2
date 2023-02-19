@@ -117,7 +117,7 @@ class Actor:
             # 終了処理
             if self.stop_flag.is_set():
                 break
-        self.env.close()
+        
     
         
     
